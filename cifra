@@ -1,0 +1,265 @@
+#!/usr/bin/env python3
+import sys
+import os
+import getpass
+import struct
+import tarfile
+import argparse
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+from cryptography.exceptions import InvalidTag
+
+CHUNK_SIZE = 64 * 1024
+MAGIC_HEADER = b'ENC2'
+
+# Header format: 4B (magic) + 1B (is_dir) + 3x4B (n, r, p) + 16B (salt) + 12B (nonce)
+HEADER_FORMAT = '>4sBIII16s12s'
+HEADER_SIZE = struct.calcsize(HEADER_FORMAT)  # Total: 45 bytes
+
+def get_key(pwd_bytes, salt, n, r, p):
+    """Derives a 256-bit key accepting raw bytes (from password or keyfile)."""
+    kdf = Scrypt(salt=salt, length=32, n=n, r=r, p=p)
+    return kdf.derive(pwd_bytes)
+
+def print_progress(current, total, bar_length=40):
+    """Prints a smooth progress bar to the terminal."""
+    if total == 0:
+        total = 1
+    percent = min(100.0, float(current) * 100 / total)
+    arrow = '-' * int(percent / 100 * bar_length - 1) + '>'
+    spaces = ' ' * (bar_length - len(arrow))
+    sys.stdout.write(f'\rProgress: [{arrow}{spaces}] {percent:.2f}%')
+    sys.stdout.flush()
+
+def get_target_size(path):
+    """Calculates total size for files and directories (useful for the progress bar)."""
+    if os.path.isfile(path):
+        return os.path.getsize(path)
+    total = 0
+    for dirpath, _, filenames in os.walk(path):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            if not os.path.islink(fp):
+                total += os.path.getsize(fp)
+    return total
+
+class EncryptingStream:
+    """File-like object to pipe tarfile output directly into AES encryption."""
+    def __init__(self, out_f, encryptor, total_size):
+        self.out_f = out_f
+        self.encryptor = encryptor
+        self.total_size = total_size
+        self.written = 0
+
+    def write(self, data):
+        encrypted = self.encryptor.update(data)
+        self.out_f.write(encrypted)
+        self.written += len(data)
+        print_progress(self.written, self.total_size)
+        return len(data)
+
+    def flush(self): pass
+    def close(self): pass
+
+def get_password_bytes(args, is_confirm_needed=False):
+    """Handles key acquisition, either from a keyfile or manual input."""
+    if args.keyfile:
+        if not os.path.isfile(args.keyfile):
+            print(f"Error: keyfile '{args.keyfile}' does not exist.")
+            sys.exit(1)
+        try:
+            with open(args.keyfile, 'rb') as kf:
+                # Read max 4MB to prevent RAM saturation while allowing rich keyfiles
+                pwd_bytes = kf.read(4 * 1024 * 1024)
+                if not pwd_bytes:
+                    print("Error: keyfile is empty.")
+                    sys.exit(1)
+                return pwd_bytes
+        except Exception as e:
+            print(f"Error reading keyfile: {e}")
+            sys.exit(1)
+    else:
+        prompt = "Enter password to encrypt: " if is_confirm_needed else "Enter password to decrypt: "
+        pwd1 = getpass.getpass(prompt)
+        if not pwd1:
+            print("Error: password cannot be empty.")
+            sys.exit(1)
+            
+        if is_confirm_needed:
+            pwd2 = getpass.getpass("Confirm password: ")
+            if pwd1 != pwd2:
+                print("Error: passwords do not match.")
+                sys.exit(1)
+                
+        return pwd1.encode('utf-8')
+
+def main():
+    parser = argparse.ArgumentParser(description="cifra - AES-GCM/Scrypt tool for files and directories.")
+    parser.add_argument("action", choices=["encode", "decode"], help="Action to perform (encode or decode)")
+    parser.add_argument("target", help="Target file or directory")
+    parser.add_argument("-f", "--force", action="store_true", help="Overwrite existing files without asking")
+    parser.add_argument("-k", "--keyfile", type=str, help="Use a file as key instead of a text password")
+    args = parser.parse_args()
+
+    target = os.path.normpath(args.target)
+
+    if not os.path.exists(target):
+        print(f"Error: target '{target}' does not exist.")
+        sys.exit(1)
+
+    if args.action == "encode":
+        is_dir = os.path.isdir(target)
+        out_path = target + ".enc"
+        
+        if os.path.exists(out_path) and not args.force:
+            ans = input(f"\nWarning: '{out_path}' already exists. Overwrite? [y/N]: ").strip().lower()
+            if ans not in ['y', 'yes']:
+                print("Operation aborted.")
+                sys.exit(0)
+
+        pwd_bytes = get_password_bytes(args, is_confirm_needed=True)
+
+        # Current Scrypt parameters
+        scrypt_n, scrypt_r, scrypt_p = 131072, 8, 1
+        salt = os.urandom(16)
+        nonce = os.urandom(12)
+        key = get_key(pwd_bytes, salt, scrypt_n, scrypt_r, scrypt_p)
+        
+        cipher = Cipher(algorithms.AES(key), modes.GCM(nonce))
+        encryptor = cipher.encryptor()
+
+        total_size = get_target_size(target)
+        tmp_path = out_path + ".tmp"
+        flag_is_dir = 1 if is_dir else 0
+
+        try:
+            with open(tmp_path, 'wb') as f_out:
+                header = struct.pack(HEADER_FORMAT, MAGIC_HEADER, flag_is_dir, scrypt_n, scrypt_r, scrypt_p, salt, nonce)
+                f_out.write(header)
+                
+                if is_dir:
+                    stream = EncryptingStream(f_out, encryptor, total_size)
+                    with tarfile.open(fileobj=stream, mode='w|') as tar:
+                        tar.add(target, arcname=os.path.basename(target))
+                else:
+                    processed = 0
+                    with open(target, 'rb') as f_in:
+                        while True:
+                            chunk = f_in.read(CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            f_out.write(encryptor.update(chunk))
+                            processed += len(chunk)
+                            print_progress(processed, total_size)
+                            
+                sys.stdout.write('\n')
+                encryptor.finalize()
+                f_out.write(encryptor.tag)
+                
+            os.replace(tmp_path, out_path)
+            print(f"Encryption completed. File created: '{out_path}'")
+            
+        except (Exception, KeyboardInterrupt) as e:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            print(f"\nEncryption aborted: {e}")
+            sys.exit(1)
+
+    elif args.action == "decode":
+        if not os.path.isfile(target):
+            print(f"Error: target '{target}' must be a file.")
+            sys.exit(1)
+
+        file_size = os.path.getsize(target)
+        if file_size < HEADER_SIZE + 16:
+            print("Error: file is too small to contain valid encrypted data.")
+            sys.exit(1)
+
+        with open(target, 'rb') as f_in:
+            header_data = f_in.read(HEADER_SIZE)
+            magic, flag_is_dir, n, r, p, salt, nonce = struct.unpack(HEADER_FORMAT, header_data)
+            
+            if magic == b'ENC1':
+                print("Error: file created with an older version. Use the previous script.")
+                sys.exit(1)
+            elif magic != MAGIC_HEADER:
+                print("Error: invalid signature. The file was not encrypted with this program.")
+                sys.exit(1)
+
+            # DoS Protection: Validate Scrypt parameters before allocating memory
+            if not (n > 0 and (n & (n - 1)) == 0):
+                print("Error: corrupted file (Scrypt 'n' is not a power of 2).")
+                sys.exit(1)
+            if not (16384 <= n <= 1048576):  # 2^14 to 2^20
+                print(f"Error: Scrypt parameter 'n' ({n}) out of safe bounds.")
+                sys.exit(1)
+            if not (1 <= r <= 16):
+                print(f"Error: Scrypt parameter 'r' ({r}) out of safe bounds.")
+                sys.exit(1)
+            if not (1 <= p <= 4):
+                print(f"Error: Scrypt parameter 'p' ({p}) out of safe bounds.")
+                sys.exit(1)
+
+        if target.endswith('.enc'):
+            base_out = target[:-4]
+        else:
+            base_out = target + ".dec"
+
+        out_path = base_out + (".tar" if flag_is_dir == 1 and not base_out.endswith(".tar") else "")
+
+        if os.path.exists(out_path) and not args.force:
+            ans = input(f"\nWarning: '{out_path}' already exists. Overwrite? [y/N]: ").strip().lower()
+            if ans not in ['y', 'yes']:
+                print("Operation aborted.")
+                sys.exit(0)
+
+        pwd_bytes = get_password_bytes(args, is_confirm_needed=False)
+
+        tmp_path = out_path + ".tmp"
+
+        try:
+            with open(target, 'rb') as f_in:
+                f_in.seek(-16, os.SEEK_END)
+                tag = f_in.read(16)
+                
+                f_in.seek(HEADER_SIZE)
+                
+                key = get_key(pwd_bytes, salt, n, r, p)
+                cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag))
+                decryptor = cipher.decryptor()
+
+                total_data = file_size - HEADER_SIZE - 16
+                bytes_left = total_data
+                processed = 0
+                
+                with open(tmp_path, 'wb') as f_out:
+                    while bytes_left > 0:
+                        chunk_size = min(CHUNK_SIZE, bytes_left)
+                        chunk = f_in.read(chunk_size)
+                        f_out.write(decryptor.update(chunk))
+                        processed += len(chunk)
+                        bytes_left -= len(chunk)
+                        print_progress(processed, total_data)
+                        
+                sys.stdout.write('\n')
+                decryptor.finalize()
+                
+            os.replace(tmp_path, out_path)
+            print(f"Decryption completed. File restored: '{out_path}'")
+            if flag_is_dir == 1:
+                print(f"Note: the original target was a directory. It has been restored as archive '{out_path}'.")
+                print(f"You can extract it with: tar -xf {out_path}")
+            
+        except InvalidTag:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            print("\nAccess denied: incorrect password/keyfile or corrupted file.")
+            sys.exit(1)
+        except (Exception, KeyboardInterrupt) as e:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            print(f"\nDecryption aborted: {e}")
+            sys.exit(1)
+
+if __name__ == "__main__":
+    main()
