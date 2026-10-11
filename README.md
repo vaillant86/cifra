@@ -50,14 +50,14 @@ sudo mv cifra /usr/local/bin/
 ## Usage
 
 ```
-cifra [-h] [-f] [-k KEYFILE] {encode,decode} target
+cifra [-h] [-f] [-k KEYFILE] {encrypt,decrypt} target
 ```
 
 | Argument | Description |
 |----------|-------------|
-| `encode` | Encrypt `target` and create `<target>.enc` |
-| `decode` | Decrypt `target` (a `.enc` file created by this tool) |
-| `target` | File to process (or directory, for `encode`) |
+| `encrypt` | Encrypt `target` and create `<target>.enc` |
+| `decrypt` | Decrypt `target` (a `.enc` file created by this tool) |
+| `target` | File to process (or directory, for `encrypt`) |
 | `-f`, `--force` | Overwrite existing output files without asking |
 | `-k`, `--keyfile KEYFILE` | Use the contents of `KEYFILE` as the key instead of a password |
 
@@ -66,7 +66,7 @@ cifra [-h] [-f] [-k KEYFILE] {encode,decode} target
 ### Encrypt a file with a password
 
 ```console
-$ cifra encode foo.bar
+$ cifra encrypt foo.bar
 ```
 
 The original `foo.bar` is left untouched.
@@ -74,7 +74,7 @@ The original `foo.bar` is left untouched.
 ### Decrypt a file with a password
 
 ```console
-$ cifra decode foo.bar.enc
+$ cifra decrypt foo.bar.enc
 ```
 
 If the file name does not end in `.enc`, the output gets a `.dec` suffix instead (for example `foo.bar.dec`).
@@ -82,8 +82,8 @@ If the file name does not end in `.enc`, the output gets a `.dec` suffix instead
 ### Use a keyfile instead of a password
 
 ```bash
-cifra encode -k my.key foo.bar
-cifra decode -k my.key foo.bar.enc
+cifra encrypt -k my.key foo.bar
+cifra decrypt -k my.key foo.bar.enc
 ```
 
 Notes about keyfiles:
@@ -95,13 +95,13 @@ Notes about keyfiles:
 ### Encrypt a directory
 
 ```console
-$ cifra encode foo
+$ cifra encrypt foo
 ```
 
 Decrypting restores a tar archive, which you can extract yourself:
 
 ```console
-$ cifra decode foo.enc
+$ cifra decrypt foo.enc
 $ tar -xf foo.tar
 ```
 
@@ -109,15 +109,15 @@ $ tar -xf foo.tar
 
 ```bash
 # Directory, keyfile, no questions asked
-cifra encode -f -k my.key foo
-cifra decode -f -k my.key foo.enc
+cifra encrypt -f -k my.key foo
+cifra decrypt -f -k my.key foo.enc
 ```
 
 ### Run without installing
 
 ```bash
-python3 cifra encode foo.bar
-python3 cifra decode foo.bar.enc
+python3 cifra encrypt foo.bar
+python3 cifra decrypt foo.bar.enc
 ```
 
 ## Limitations and security notes

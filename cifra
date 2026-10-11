@@ -94,8 +94,8 @@ def get_password_bytes(args, is_confirm_needed=False):
         return pwd1.encode('utf-8')
 
 def main():
-    parser = argparse.ArgumentParser(description="cifra - AES-GCM/Scrypt tool for files and directories.")
-    parser.add_argument("action", choices=["encode", "decode"], help="Action to perform (encode or decode)")
+    parser = argparse.ArgumentParser(description="Cifra - encryption tool for files and directories.")
+    parser.add_argument("action", choices=["encrypt", "decrypt"], help="Action to perform (encrypt or decrypt)")
     parser.add_argument("target", help="Target file or directory")
     parser.add_argument("-f", "--force", action="store_true", help="Overwrite existing files without asking")
     parser.add_argument("-k", "--keyfile", type=str, help="Use a file as key instead of a text password")
@@ -107,7 +107,7 @@ def main():
         print(f"Error: target '{target}' does not exist.")
         sys.exit(1)
 
-    if args.action == "encode":
+    if args.action == "encrypt":
         is_dir = os.path.isdir(target)
         out_path = target + ".enc"
         
@@ -165,7 +165,7 @@ def main():
             print(f"\nEncryption aborted: {e}")
             sys.exit(1)
 
-    elif args.action == "decode":
+    elif args.action == "decrypt":
         if not os.path.isfile(target):
             print(f"Error: target '{target}' must be a file.")
             sys.exit(1)
