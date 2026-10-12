@@ -1,4 +1,4 @@
-# cifra
+# Cifra
 
 A command-line tool to encrypt and decrypt files and directories with **AES-256-GCM**, using a key derived with **scrypt** from a password or a keyfile.
 
@@ -84,3 +84,7 @@ python3 cifra decrypt foo.bar.enc
 - AES-GCM with a single nonce is limited to about 64 GiB per file.
 - With `-k` the keyfile alone is the secret. Anyone who holds that file can decrypt your data.
 - Directories are restored as `.tar` archives rather than extracted automatically. As with any tar file, only extract archives you trust.
+
+## License
+
+This project is licensed under the GNU AGPLv3 License - see the [LICENSE](LICENSE) file for details.
