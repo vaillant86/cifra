@@ -59,59 +59,13 @@ cifra [-h] [-f] [-k KEYFILE] {encrypt,decrypt} target
 | `decrypt` | Decrypt `target` (a `.enc` file created by this tool) |
 | `target` | File to process (or directory, for `encrypt`) |
 | `-f`, `--force` | Overwrite existing output files without asking |
-| `-k`, `--keyfile KEYFILE` | Use the contents of `KEYFILE` as the key instead of a password |
-
-## Examples
-
-### Encrypt a file with a password
-
-```console
-$ cifra encrypt foo.bar
-```
-
-The original `foo.bar` is left untouched.
-
-### Decrypt a file with a password
-
-```console
-$ cifra decrypt foo.bar.enc
-```
-
-If the file name does not end in `.enc`, the output gets a `.dec` suffix instead (for example `foo.bar.dec`).
-
-### Use a keyfile instead of a password
-
-```bash
-cifra encrypt -k my.key foo.bar
-cifra decrypt -k my.key foo.bar.enc
-```
+| `-k`, `--keyfile` | Use the contents of `KEYFILE` as the key instead of a password |
 
 Notes about keyfiles:
 
-- Only the first 4 MB of the keyfile are used, and an empty keyfile is rejected.
+- Max size of a readable keyfile is set to 4 MB and an empty keyfile is rejected.
 - Use a binary file, not a text file: if an editor changes even one byte (for example by adding a trailing newline), the key changes and you will not be able to decrypt.
 - Keep a backup copy. Without the keyfile the data cannot be recovered.
-
-### Encrypt a directory
-
-```console
-$ cifra encrypt foo
-```
-
-Decrypting restores a tar archive, which you can extract yourself:
-
-```console
-$ cifra decrypt foo.enc
-$ tar -xf foo.tar
-```
-
-### Combine options
-
-```bash
-# Directory, keyfile, no questions asked
-cifra encrypt -f -k my.key foo
-cifra decrypt -f -k my.key foo.enc
-```
 
 ### Run without installing
 
